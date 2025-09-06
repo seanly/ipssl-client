@@ -1,0 +1,45 @@
+name: ipssl-client
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+      - ./data/caddy/logs:/var/log/caddy
+      - ./data/caddy/webroot:/usr/share/caddy
+      - ./data/caddy/ipssl:/ipssl
+    environment:
+      - WEB_DOMAIN=${IP_WEB_DOMAIN:-47.108.182.108}
+    restart: always
+    container_name: caddy-1
+
+  ipssl-client:
+    build: ..
+    container_name: ipssl-client
+    image: seanly/appset:ipssl-client
+    environment:
+      - CLIENT_IP=${IPSSL_CLIENT_IP}
+      - IPSSL_API_KEY=${IPSSL_API_KEY}
+      - IPSSL_VALIDATION_DIR=${IPSSL_VALIDATION_DIR:-/usr/share/caddy/}
+      - IPSSL_SSL_DIR=${IPSSL_SSL_DIR:-/ipssl/}
+      - IPSSL_CONTAINER_NAME=${IPSSL_CONTAINER_NAME:-caddy-1}
+      - RENEWAL_INTERVAL=${RENEWAL_INTERVAL:-24h}
+      - CERT_VALIDITY=${CERT_VALIDITY:-720h}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/caddy/webroot:/usr/share/caddy
+      - ./data/caddy/ipssl:/ipssl
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - caddy
+    restart: always
+    container_name: ipssl-client
+
+networks:
+  default:
+    name: ipssl-network
