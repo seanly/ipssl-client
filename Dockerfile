@@ -24,23 +24,13 @@ FROM alpine:latest
 # Install runtime dependencies
 RUN apk --no-cache add ca-certificates tzdata docker-cli
 
-# Create non-root user and docker group
-RUN addgroup -g 1001 -S appgroup && \
-    addgroup -S docker && \
-    adduser -u 1001 -S appuser -G appgroup && \
-    adduser appuser docker
-
 WORKDIR /app
 
 # Copy binary from builder stage
 COPY --from=builder /app/ipssl-client .
 
 # Create required directories
-RUN mkdir -p /ipssl /usr/share/caddy/.well-known/pki-validation && \
-    chown -R appuser:appgroup /ipssl /usr/share/caddy
-
-# Switch to non-root user
-USER appuser
+RUN mkdir -p /ipssl /usr/share/caddy/.well-known/pki-validation
 
 # Expose ports (if needed for health checks)
 EXPOSE 8080
