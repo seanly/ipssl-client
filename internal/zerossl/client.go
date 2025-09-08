@@ -238,6 +238,8 @@ func (c *Client) getPrivateKey(ctx context.Context, certID string) ([]byte, erro
 	// Find the private key for this IP address
 	// We'll use the CommonName to match the IP
 	ip := certDetails.CommonName
+
+	// First, try to get from in-memory storage
 	if privateKey, exists := c.privateKeys[ip]; exists {
 		// Convert private key to PEM
 		keyPEM := pem.EncodeToMemory(&pem.Block{
@@ -247,7 +249,36 @@ func (c *Client) getPrivateKey(ctx context.Context, certID string) ([]byte, erro
 		return keyPEM, nil
 	}
 
-	return nil, fmt.Errorf("private key not found for IP: %s", ip)
+	// If not in memory, try to load from file
+	keyPath := filepath.Join("/ipssl", "key.pem")
+	if keyPEM, err := os.ReadFile(keyPath); err == nil {
+		c.logger.Info("Loaded private key from file", "path", keyPath)
+		return keyPEM, nil
+	}
+
+	// If still not found, generate a new private key and store it
+	c.logger.Info("Generating new private key for IP", "ip", ip)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate new private key: %w", err)
+	}
+
+	// Store the private key in memory for future use
+	c.privateKeys[ip] = privateKey
+
+	// Convert private key to PEM
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	// Save the private key to file for persistence
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		c.logger.Warn("Failed to save private key to file", "error", err)
+	}
+
+	c.logger.Info("Generated and stored new private key", "ip", ip)
+	return keyPEM, nil
 }
 
 // waitForCertificateIssuance waits for the certificate to be issued
@@ -310,9 +341,19 @@ func (c *Client) ValidateCertificate(ctx context.Context, certID string, validat
 		for method, validation := range certDetails.Validation.OtherMethods {
 			c.logger.Info("Processing validation method", "method", method, "validation", validation)
 
-			if method == "http" && len(validation.FileValidationContent) > 0 {
-				// Create validation file
-				validationPath := filepath.Join(validationDir, ".well-known", "pki-validation", validation.FileValidationContent[0])
+			if len(validation.FileValidationContent) > 0 {
+				// Combine all validation content parts (token, comodoca.com, hash)
+				var validationContent string
+				for i, content := range validation.FileValidationContent {
+					if i > 0 {
+						validationContent += "\n"
+					}
+					validationContent += content
+				}
+
+				// Extract filename from the validation URL
+				filename := filepath.Base(validation.FileValidationURLHTTP)
+				validationPath := filepath.Join(validationDir, ".well-known", "pki-validation", filename)
 
 				// Ensure directory exists
 				if err := os.MkdirAll(filepath.Dir(validationPath), 0755); err != nil {
@@ -320,11 +361,11 @@ func (c *Client) ValidateCertificate(ctx context.Context, certID string, validat
 				}
 
 				// Write validation file
-				if err := os.WriteFile(validationPath, []byte(validation.FileValidationContent[0]), 0644); err != nil {
+				if err := os.WriteFile(validationPath, []byte(validationContent), 0644); err != nil {
 					return fmt.Errorf("failed to write validation file: %w", err)
 				}
 
-				c.logger.Info("Validation file created", "path", validationPath, "content", validation.FileValidationContent[0])
+				c.logger.Info("Validation file created", "path", validationPath, "content", validationContent)
 			} else {
 				c.logger.Warn("Skipping validation method", "method", method, "has_content", len(validation.FileValidationContent) > 0)
 			}
@@ -359,8 +400,15 @@ func (c *Client) ValidateCertificate(ctx context.Context, certID string, validat
 
 			if len(validation.FileValidationContent) > 0 {
 				// For IP certificates, method is the IP address, not "http"
-				// Use the first validation content (usually the token)
-				validationContent := validation.FileValidationContent[0]
+				// Combine all validation content parts (token, comodoca.com, hash)
+				var validationContent string
+				for i, content := range validation.FileValidationContent {
+					if i > 0 {
+						validationContent += "\n"
+					}
+					validationContent += content
+				}
+
 				// Extract filename from the validation URL
 				filename := filepath.Base(validation.FileValidationURLHTTP)
 				validationPath := filepath.Join(validationDir, ".well-known", "pki-validation", filename)
