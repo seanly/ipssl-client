@@ -95,9 +95,8 @@ func (c *Client) RequestCertificate(ctx context.Context, ip string) ([]byte, []b
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to wait for certificate issuance: %w", err)
 	}
-
-	// Download certificate
-	certBundle, err := c.client.DownloadCertificate(ctx, certDetails.ID, false)
+	// Download certificate with cross-signed certificates (intermediate certificates)
+	certBundle, err := c.client.DownloadCertificate(ctx, certDetails.ID, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to download certificate: %w", err)
 	}
@@ -109,8 +108,20 @@ func (c *Client) RequestCertificate(ctx context.Context, ip string) ([]byte, []b
 		return nil, nil, fmt.Errorf("failed to get private key: %w", err)
 	}
 
-	c.logger.Info("Certificate downloaded successfully", "cert_id", certDetails.ID)
-	return []byte(certBundle.CertificateCrt), keyPEM, nil
+	// Combine the main certificate with the intermediate certificate chain
+	var fullCertChain string
+	if certBundle.CertificateCrt != "" {
+		fullCertChain = certBundle.CertificateCrt
+	}
+	if certBundle.CABundleCrt != "" {
+		if fullCertChain != "" {
+			fullCertChain += "\n"
+		}
+		fullCertChain += certBundle.CABundleCrt
+	}
+
+	c.logger.Info("Certificate downloaded successfully", "cert_id", certDetails.ID, "has_intermediate", certBundle.CABundleCrt != "")
+	return []byte(fullCertChain), keyPEM, nil
 }
 
 // IsCertificateValid checks if a certificate is valid and not expired

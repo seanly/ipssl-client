@@ -141,6 +141,18 @@ func (c *Client) requestCertificate(ctx context.Context) error {
 		return fmt.Errorf("failed to request certificate from ZeroSSL: %w", err)
 	}
 
+	// Log certificate chain information
+	certStr := string(cert)
+	// Count certificate blocks (each certificate starts with -----BEGIN CERTIFICATE-----)
+	certBlocks := 0
+	beginMarker := "-----BEGIN CERTIFICATE-----"
+	for i := 0; i < len(certStr)-len(beginMarker); i++ {
+		if certStr[i:i+len(beginMarker)] == beginMarker {
+			certBlocks++
+		}
+	}
+	c.logger.Info("Certificate chain received", "total_certificates", certBlocks, "cert_size_bytes", len(cert))
+
 	// Save certificate files
 	certPath := filepath.Join(c.config.SSLDir, "cert.pem")
 	keyPath := filepath.Join(c.config.SSLDir, "key.pem")
