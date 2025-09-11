@@ -60,9 +60,10 @@ func (c *Client) Start(ctx context.Context) error {
 
 	// Check if certificate already exists and is valid
 	if c.isCertificateValid() {
-		c.logger.Info("Valid certificate already exists")
+		c.logger.Info("Valid certificate already exists, skipping initial download")
 	} else {
-		// Request new certificate
+		// Request new certificate (file missing or expired)
+		c.logger.Info("Certificate needs to be downloaded (missing or invalid)")
 		if err := c.requestCertificate(ctx); err != nil {
 			return fmt.Errorf("failed to request certificate: %w", err)
 		}
@@ -79,7 +80,7 @@ func (c *Client) Start(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if !c.isCertificateValid() {
-				c.logger.Info("Certificate needs renewal")
+				c.logger.Info("Certificate needs renewal (missing, expired, or expiring soon)")
 				if err := c.requestCertificate(ctx); err != nil {
 					c.logger.Error("Failed to renew certificate", "error", err)
 					continue
@@ -108,24 +109,42 @@ func (c *Client) ensureDirectories() error {
 	return nil
 }
 
-// isCertificateValid checks if the current certificate is valid
-func (c *Client) isCertificateValid() bool {
+// certificateFilesExist checks if both certificate and key files exist
+func (c *Client) certificateFilesExist() (bool, string) {
 	certPath := filepath.Join(c.config.SSLDir, "cert.pem")
 	keyPath := filepath.Join(c.config.SSLDir, "key.pem")
 
-	// Check if certificate files exist
 	if _, err := os.Stat(certPath); os.IsNotExist(err) {
-		return false
+		return false, "certificate file missing"
 	}
+
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+		return false, "private key file missing"
+	}
+
+	return true, "both files exist"
+}
+
+// isCertificateValid checks if the current certificate is valid
+func (c *Client) isCertificateValid() bool {
+	certPath := filepath.Join(c.config.SSLDir, "cert.pem")
+
+	// First check if files exist
+	filesExist, reason := c.certificateFilesExist()
+	if !filesExist {
+		c.logger.Info("Certificate files missing, will download new certificate", "reason", reason)
 		return false
 	}
 
-	// Check certificate validity
+	// Check certificate validity (expiration, etc.)
 	valid, err := c.zerossl.IsCertificateValid(certPath, c.config.CertValidity)
 	if err != nil {
-		c.logger.Error("Failed to check certificate validity", "error", err)
+		c.logger.Error("Failed to check certificate validity", "error", err, "cert_path", certPath)
 		return false
+	}
+
+	if !valid {
+		c.logger.Info("Certificate is expired or will expire soon, will download new certificate", "cert_path", certPath)
 	}
 
 	return valid
@@ -151,7 +170,8 @@ func (c *Client) requestCertificate(ctx context.Context) error {
 			certBlocks++
 		}
 	}
-	c.logger.Info("Certificate chain received", "total_certificates", certBlocks, "cert_size_bytes", len(cert))
+	c.logger.Info("Certificate chain rece
+	ived", "total_certificates", certBlocks, "cert_size_bytes", len(cert))
 
 	// Save certificate files
 	certPath := filepath.Join(c.config.SSLDir, "cert.pem")
