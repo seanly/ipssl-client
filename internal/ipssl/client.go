@@ -170,8 +170,7 @@ func (c *Client) requestCertificate(ctx context.Context) error {
 			certBlocks++
 		}
 	}
-	c.logger.Info("Certificate chain rece
-	ived", "total_certificates", certBlocks, "cert_size_bytes", len(cert))
+	c.logger.Info("Certificate chain received", "total_certificates", certBlocks, "cert_size_bytes", len(cert))
 
 	// Save certificate files
 	certPath := filepath.Join(c.config.SSLDir, "cert.pem")
